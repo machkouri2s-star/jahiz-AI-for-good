@@ -1,0 +1,1176 @@
+{
+  "updatedAt": "2026-11-10T18:51:45.709Z",
+  "createdAt": "2026-11-10T17:55:21.067Z",
+  "id": "keGPyMkxAbXpwDM3",
+  "name": "Jahiz Hajj Prep: Pain Rules Demo",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "f51c09a2-d978-4922-a4b5-3661cf6118dc",
+      "name": "Supervisor Chat Input",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        96
+      ],
+      "webhookId": "24faf5a9-2b73-42c4-b5d7-9a486163c318"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = String($input.first().json.chatInput || '');\nconst fields = {};\nraw.split(/[,;]/).forEach((part) => {\n  const i = part.indexOf(':');\n  if (i > 0) {\n    fields[part.slice(0, i).trim().toLowerCase()] = part.slice(i + 1).trim();\n  }\n});\n\nconst errors = [];\nconst id = fields['id'] || '';\nif (!/^[A-Za-z0-9_-]{2,20}$/.test(id)) errors.push('BAD_ID');\n\nconst toScore = (v) => (v !== undefined && /^[0-9]{1,2}$/.test(v) && Number(v) <= 10) ? Number(v) : null;\nconst pain = toScore(fields['pain']);\nif (pain === null) errors.push('BAD_PAIN');\nconst effort = toScore(fields['effort']);\nif (effort === null) errors.push('BAD_EFFORT');\n\nlet status = null;\nlet timeoutMinutes = null;\nconst sup = (fields['supervisor'] || '').toLowerCase().split(' ').filter(Boolean);\nif (sup.length === 1 && sup[0] === 'available') {\n  status = 'available';\n} else if (sup.length === 2 && sup[0] === 'timeout' && /^[0-9]{1,4}$/.test(sup[1]) && Number(sup[1]) > 0) {\n  status = 'timeout';\n  timeoutMinutes = Number(sup[1]);\n} else {\n  errors.push('BAD_SUPERVISOR');\n}\n\nif (errors.length > 0) {\n  const meaning = {\n    BAD_ID: 'pseudonymous ID missing or invalid (2-20 letters, digits, - or _)',\n    BAD_PAIN: 'pain must be a whole number from 0 to 10',\n    BAD_EFFORT: 'effort must be a whole number from 0 to 10',\n    BAD_SUPERVISOR: 'supervisor must be \"available\" or \"timeout <minutes>\"',\n  };\n  const lines = errors.map((e) => '- ' + e + ': ' + meaning[e]);\n  const text = ['**Input rejected. Nothing was processed.**'].concat(lines).concat([\n    '',\n    'Expected format:',\n    'ID: PX-014, pain: 5, effort: 6, supervisor: available',\n    'or: ID: PX-016, pain: 2, effort: 5, supervisor: timeout 15',\n    '',\n    '_DEMO: synthetic data only. The rejected message was not stored._',\n  ]).join('\\n');\n  return [{ json: { valid: false, reason_code: errors.join('|'), error_text: text } }];\n}\n\nreturn [{ json: { valid: true, pseudonymous_id: id, pain, effort, supervisor_status: status, timeout_minutes: timeoutMinutes } }];"
+      },
+      "id": "33dda8ee-c2b0-456a-a7c6-e06ee7825c86",
+      "name": "Parse and Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "705502fc-0671-4125-89db-2ca945f49cb3",
+      "name": "Input Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        832,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst rules = [];\nconst actions = [];\n\nif (d.pain >= 4) {\n  rules.push('PAIN_ALERT (pain >= 4)');\n  actions.push('STOP exercise and flag case for human supervisor');\n}\nif (d.supervisor_status === 'timeout') {\n  rules.push('SUPERVISOR_TIMEOUT');\n  actions.push('Mark for backup escalation (SIMULATED: supervisor did not respond within ' + d.timeout_minutes + ' min; no real message sent)');\n}\n\nlet rule = 'NONE';\nlet action = 'No rule triggered. Training load unchanged';\nlet reviewed = 'Not required';\nif (rules.length > 0) {\n  rule = rules.join(' + ');\n  action = actions.join(' + ');\n  reviewed = 'No, pending human review';\n}\n\nconst supText = d.supervisor_status === 'available'\n  ? 'available'\n  : 'no response within ' + d.timeout_minutes + ' min (SIMULATED timeout)';\n\nconst reply = [\n  '**Result for ' + d.pseudonymous_id + '**',\n  '- Pain: ' + d.pain + '/10 | Effort: ' + d.effort + '/10',\n  '- Supervisor: ' + supText,\n  '- Rule triggered: ' + rule,\n  '- Action: ' + action,\n  '- Human reviewed: ' + reviewed,\n  '- Audit entry: saved',\n  '',\n  '_DEMO: synthetic data, simulated timeout, no alerts sent. Training load is never raised automatically; no medical or religious rulings are given._',\n].join('\\n');\n\nreturn [{ json: Object.assign({}, d, {\n  logged_at: new Date().toISOString(),\n  rule_triggered: rule,\n  action_taken: action,\n  human_reviewed: reviewed,\n  reply_text: reply,\n}) }];"
+      },
+      "id": "b988a7e9-8f8b-4cff-bc51-8a84d7923a85",
+      "name": "Apply Fixed Rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "zJWiUOjKAXXUB3gi",
+          "cachedResultName": "jahiz_audit_log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "logged_at": "={{ $json.logged_at }}",
+            "record_type": "valid_update",
+            "pseudonymous_id": "={{ $json.pseudonymous_id }}",
+            "pain": "={{ $json.pain }}",
+            "effort": "={{ $json.effort }}",
+            "supervisor_status": "={{ $json.supervisor_status }}",
+            "timeout_minutes": "={{ $json.timeout_minutes }}",
+            "rule_triggered": "={{ $json.rule_triggered }}",
+            "action_taken": "={{ $json.action_taken }}",
+            "human_reviewed": "={{ $json.human_reviewed }}",
+            "reason_code": "",
+            "simulated": true
+          },
+          "schema": [
+            {
+              "id": "logged_at",
+              "displayName": "logged_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "record_type",
+              "displayName": "record_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pseudonymous_id",
+              "displayName": "pseudonymous_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pain",
+              "displayName": "pain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "effort",
+              "displayName": "effort",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "supervisor_status",
+              "displayName": "supervisor_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timeout_minutes",
+              "displayName": "timeout_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "rule_triggered",
+              "displayName": "rule_triggered",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action_taken",
+              "displayName": "action_taken",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "human_reviewed",
+              "displayName": "human_reviewed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reason_code",
+              "displayName": "reason_code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "simulated",
+              "displayName": "simulated",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "114f7610-e845-4fd3-a9fa-50d0f2b28ad0",
+      "name": "Log Valid Update",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1328,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "output",
+              "type": "string",
+              "value": "={{ $(\"Apply Fixed Rules\").item.json.reply_text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3d9c9a55-929d-402b-8df5-1a8529a99d21",
+      "name": "Chat Reply: Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1552,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "zJWiUOjKAXXUB3gi",
+          "cachedResultName": "jahiz_audit_log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "logged_at": "={{ $now.toISO() }}",
+            "record_type": "rejected_input",
+            "rule_triggered": "INPUT_REJECTED",
+            "action_taken": "Format error shown. Raw message not stored",
+            "human_reviewed": "Not required",
+            "reason_code": "={{ $json.reason_code }}",
+            "simulated": true
+          },
+          "schema": [
+            {
+              "id": "logged_at",
+              "displayName": "logged_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "record_type",
+              "displayName": "record_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pseudonymous_id",
+              "displayName": "pseudonymous_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pain",
+              "displayName": "pain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "effort",
+              "displayName": "effort",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "supervisor_status",
+              "displayName": "supervisor_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timeout_minutes",
+              "displayName": "timeout_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "rule_triggered",
+              "displayName": "rule_triggered",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action_taken",
+              "displayName": "action_taken",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "human_reviewed",
+              "displayName": "human_reviewed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reason_code",
+              "displayName": "reason_code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "simulated",
+              "displayName": "simulated",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "257a889e-b423-45ef-9e5e-bd462dd742e9",
+      "name": "Log Rejected Input",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1104,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "output",
+              "type": "string",
+              "value": "={{ $(\"Parse and Validate\").item.json.error_text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dd62f2cc-92e8-49c1-9f7b-0775e206c765",
+      "name": "Chat Reply: Format Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1328,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "id"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "Explain the supplied Jahiz rule result in one or two clear sentences. The fixed rule result is final: do not change the action, thresholds, or review status. Do not diagnose or give medical or religious advice. If a pain alert is present, state that exercise must stop and a human supervisor must review it. Label any timeout as simulated. The data is synthetic."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        80,
+        -80
+      ],
+      "id": "974abd34-b964-4366-8942-e868db0543e6",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Supervisor Chat Input": {
+      "main": [
+        [
+          {
+            "node": "Parse and Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and Validate": {
+      "main": [
+        [
+          {
+            "node": "Input Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Valid?": {
+      "main": [
+        [
+          {
+            "node": "Apply Fixed Rules",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Rejected Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Fixed Rules": {
+      "main": [
+        [
+          {
+            "node": "Log Valid Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Valid Update": {
+      "main": [
+        [
+          {
+            "node": "Chat Reply: Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Rejected Input": {
+      "main": [
+        [
+          {
+            "node": "Chat Reply: Format Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Parse and Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [
+    {
+      "id": "db1ad649-6e39-4624-b14d-60188284a36a",
+      "name": "Apply rules and log",
+      "nodeIds": [
+        "b988a7e9-8f8b-4cff-bc51-8a84d7923a85",
+        "114f7610-e845-4fd3-a9fa-50d0f2b28ad0",
+        "3d9c9a55-929d-402b-8df5-1a8529a99d21"
+      ],
+      "description": "Valid updates: applies the fixed pain and supervisor rules, writes an audit row, replies in chat"
+    },
+    {
+      "id": "789c3c95-a304-4e4c-baee-bf3491937a49",
+      "name": "Handle rejected input",
+      "nodeIds": [
+        "257a889e-b423-45ef-9e5e-bd462dd742e9",
+        "dd62f2cc-92e8-49c1-9f7b-0775e206c765"
+      ],
+      "description": "Invalid updates: records only a reason code (no raw text) and shows the expected format"
+    }
+  ],
+  "pinData": {},
+  "versionId": "2603bb7b-2f9b-422b-bb8b-2db6a16e03a1",
+  "activeVersionId": "2603bb7b-2f9b-422b-bb8b-2db6a16e03a1",
+  "versionCounter": 17,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "parentFolder": null,
+  "activeVersion": {
+    "updatedAt": "2026-11-10T18:59:55.000Z",
+    "createdAt": "2026-11-10T18:51:45.711Z",
+    "versionId": "2603bb7b-2f9b-422b-bb8b-2db6a16e03a1",
+    "workflowId": "keGPyMkxAbXpwDM3",
+    "nodes": [
+      {
+        "parameters": {
+          "options": {
+            "responseMode": "lastNode"
+          }
+        },
+        "id": "f51c09a2-d978-4922-a4b5-3661cf6118dc",
+        "name": "Supervisor Chat Input",
+        "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+        "typeVersion": 1.5,
+        "position": [
+          0,
+          96
+        ],
+        "webhookId": "24faf5a9-2b73-42c4-b5d7-9a486163c318"
+      },
+      {
+        "parameters": {
+          "jsCode": "const raw = String($input.first().json.chatInput || '');\nconst fields = {};\nraw.split(/[,;]/).forEach((part) => {\n  const i = part.indexOf(':');\n  if (i > 0) {\n    fields[part.slice(0, i).trim().toLowerCase()] = part.slice(i + 1).trim();\n  }\n});\n\nconst errors = [];\nconst id = fields['id'] || '';\nif (!/^[A-Za-z0-9_-]{2,20}$/.test(id)) errors.push('BAD_ID');\n\nconst toScore = (v) => (v !== undefined && /^[0-9]{1,2}$/.test(v) && Number(v) <= 10) ? Number(v) : null;\nconst pain = toScore(fields['pain']);\nif (pain === null) errors.push('BAD_PAIN');\nconst effort = toScore(fields['effort']);\nif (effort === null) errors.push('BAD_EFFORT');\n\nlet status = null;\nlet timeoutMinutes = null;\nconst sup = (fields['supervisor'] || '').toLowerCase().split(' ').filter(Boolean);\nif (sup.length === 1 && sup[0] === 'available') {\n  status = 'available';\n} else if (sup.length === 2 && sup[0] === 'timeout' && /^[0-9]{1,4}$/.test(sup[1]) && Number(sup[1]) > 0) {\n  status = 'timeout';\n  timeoutMinutes = Number(sup[1]);\n} else {\n  errors.push('BAD_SUPERVISOR');\n}\n\nif (errors.length > 0) {\n  const meaning = {\n    BAD_ID: 'pseudonymous ID missing or invalid (2-20 letters, digits, - or _)',\n    BAD_PAIN: 'pain must be a whole number from 0 to 10',\n    BAD_EFFORT: 'effort must be a whole number from 0 to 10',\n    BAD_SUPERVISOR: 'supervisor must be \"available\" or \"timeout <minutes>\"',\n  };\n  const lines = errors.map((e) => '- ' + e + ': ' + meaning[e]);\n  const text = ['**Input rejected. Nothing was processed.**'].concat(lines).concat([\n    '',\n    'Expected format:',\n    'ID: PX-014, pain: 5, effort: 6, supervisor: available',\n    'or: ID: PX-016, pain: 2, effort: 5, supervisor: timeout 15',\n    '',\n    '_DEMO: synthetic data only. The rejected message was not stored._',\n  ]).join('\\n');\n  return [{ json: { valid: false, reason_code: errors.join('|'), error_text: text } }];\n}\n\nreturn [{ json: { valid: true, pseudonymous_id: id, pain, effort, supervisor_status: status, timeout_minutes: timeoutMinutes } }];"
+        },
+        "id": "33dda8ee-c2b0-456a-a7c6-e06ee7825c86",
+        "name": "Parse and Validate",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          608,
+          96
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.valid }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "705502fc-0671-4125-89db-2ca945f49cb3",
+        "name": "Input Valid?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.4,
+        "position": [
+          832,
+          96
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const d = $input.first().json;\nconst rules = [];\nconst actions = [];\n\nif (d.pain >= 4) {\n  rules.push('PAIN_ALERT (pain >= 4)');\n  actions.push('STOP exercise and flag case for human supervisor');\n}\nif (d.supervisor_status === 'timeout') {\n  rules.push('SUPERVISOR_TIMEOUT');\n  actions.push('Mark for backup escalation (SIMULATED: supervisor did not respond within ' + d.timeout_minutes + ' min; no real message sent)');\n}\n\nlet rule = 'NONE';\nlet action = 'No rule triggered. Training load unchanged';\nlet reviewed = 'Not required';\nif (rules.length > 0) {\n  rule = rules.join(' + ');\n  action = actions.join(' + ');\n  reviewed = 'No, pending human review';\n}\n\nconst supText = d.supervisor_status === 'available'\n  ? 'available'\n  : 'no response within ' + d.timeout_minutes + ' min (SIMULATED timeout)';\n\nconst reply = [\n  '**Result for ' + d.pseudonymous_id + '**',\n  '- Pain: ' + d.pain + '/10 | Effort: ' + d.effort + '/10',\n  '- Supervisor: ' + supText,\n  '- Rule triggered: ' + rule,\n  '- Action: ' + action,\n  '- Human reviewed: ' + reviewed,\n  '- Audit entry: saved',\n  '',\n  '_DEMO: synthetic data, simulated timeout, no alerts sent. Training load is never raised automatically; no medical or religious rulings are given._',\n].join('\\n');\n\nreturn [{ json: Object.assign({}, d, {\n  logged_at: new Date().toISOString(),\n  rule_triggered: rule,\n  action_taken: action,\n  human_reviewed: reviewed,\n  reply_text: reply,\n}) }];"
+        },
+        "id": "b988a7e9-8f8b-4cff-bc51-8a84d7923a85",
+        "name": "Apply Fixed Rules",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1104,
+          128
+        ]
+      },
+      {
+        "parameters": {
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "zJWiUOjKAXXUB3gi",
+            "cachedResultName": "jahiz_audit_log"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "logged_at": "={{ $json.logged_at }}",
+              "record_type": "valid_update",
+              "pseudonymous_id": "={{ $json.pseudonymous_id }}",
+              "pain": "={{ $json.pain }}",
+              "effort": "={{ $json.effort }}",
+              "supervisor_status": "={{ $json.supervisor_status }}",
+              "timeout_minutes": "={{ $json.timeout_minutes }}",
+              "rule_triggered": "={{ $json.rule_triggered }}",
+              "action_taken": "={{ $json.action_taken }}",
+              "human_reviewed": "={{ $json.human_reviewed }}",
+              "reason_code": "",
+              "simulated": true
+            },
+            "schema": [
+              {
+                "id": "logged_at",
+                "displayName": "logged_at",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "record_type",
+                "displayName": "record_type",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "pseudonymous_id",
+                "displayName": "pseudonymous_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "pain",
+                "displayName": "pain",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "effort",
+                "displayName": "effort",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "supervisor_status",
+                "displayName": "supervisor_status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "timeout_minutes",
+                "displayName": "timeout_minutes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "rule_triggered",
+                "displayName": "rule_triggered",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "action_taken",
+                "displayName": "action_taken",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "human_reviewed",
+                "displayName": "human_reviewed",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "reason_code",
+                "displayName": "reason_code",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "simulated",
+                "displayName": "simulated",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "boolean",
+                "canBeUsedToMatch": true
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "114f7610-e845-4fd3-a9fa-50d0f2b28ad0",
+        "name": "Log Valid Update",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "position": [
+          1328,
+          128
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "a1",
+                "name": "output",
+                "type": "string",
+                "value": "={{ $(\"Apply Fixed Rules\").item.json.reply_text }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "3d9c9a55-929d-402b-8df5-1a8529a99d21",
+        "name": "Chat Reply: Result",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.5,
+        "position": [
+          1552,
+          128
+        ]
+      },
+      {
+        "parameters": {
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "zJWiUOjKAXXUB3gi",
+            "cachedResultName": "jahiz_audit_log"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "logged_at": "={{ $now.toISO() }}",
+              "record_type": "rejected_input",
+              "rule_triggered": "INPUT_REJECTED",
+              "action_taken": "Format error shown. Raw message not stored",
+              "human_reviewed": "Not required",
+              "reason_code": "={{ $json.reason_code }}",
+              "simulated": true
+            },
+            "schema": [
+              {
+                "id": "logged_at",
+                "displayName": "logged_at",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "record_type",
+                "displayName": "record_type",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "pseudonymous_id",
+                "displayName": "pseudonymous_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "pain",
+                "displayName": "pain",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "effort",
+                "displayName": "effort",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "supervisor_status",
+                "displayName": "supervisor_status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "timeout_minutes",
+                "displayName": "timeout_minutes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "rule_triggered",
+                "displayName": "rule_triggered",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "action_taken",
+                "displayName": "action_taken",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "human_reviewed",
+                "displayName": "human_reviewed",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "reason_code",
+                "displayName": "reason_code",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "simulated",
+                "displayName": "simulated",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "boolean",
+                "canBeUsedToMatch": true
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "257a889e-b423-45ef-9e5e-bd462dd742e9",
+        "name": "Log Rejected Input",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "position": [
+          1104,
+          320
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "b1",
+                "name": "output",
+                "type": "string",
+                "value": "={{ $(\"Parse and Validate\").item.json.error_text }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "dd62f2cc-92e8-49c1-9f7b-0775e206c765",
+        "name": "Chat Reply: Format Error",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.5,
+        "position": [
+          1328,
+          320
+        ]
+      },
+      {
+        "parameters": {
+          "modelId": {
+            "__rl": true,
+            "value": "gpt-4.1",
+            "mode": "id"
+          },
+          "responses": {
+            "values": [
+              {
+                "content": "Explain the supplied Jahiz rule result in one or two clear sentences. The fixed rule result is final: do not change the action, thresholds, or review status. Do not diagnose or give medical or religious advice. If a pain alert is present, state that exercise must stop and a human supervisor must review it. Label any timeout as simulated. The data is synthetic."
+              }
+            ]
+          },
+          "builtInTools": {},
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.openAi",
+        "typeVersion": 2.3,
+        "position": [
+          80,
+          -80
+        ],
+        "id": "974abd34-b964-4366-8942-e868db0543e6",
+        "name": "Message a model",
+        "credentials": {
+          "openAiApi": {
+            "id": null,
+            "name": "",
+            "__aiGatewayManaged": true
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Supervisor Chat Input": {
+        "main": [
+          [
+            {
+              "node": "Parse and Validate",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse and Validate": {
+        "main": [
+          [
+            {
+              "node": "Input Valid?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Input Valid?": {
+        "main": [
+          [
+            {
+              "node": "Apply Fixed Rules",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Rejected Input",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Apply Fixed Rules": {
+        "main": [
+          [
+            {
+              "node": "Log Valid Update",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Valid Update": {
+        "main": [
+          [
+            {
+              "node": "Chat Reply: Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Rejected Input": {
+        "main": [
+          [
+            {
+              "node": "Chat Reply: Format Error",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Message a model": {
+        "main": [
+          [
+            {
+              "node": "Parse and Validate",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [
+      {
+        "id": "db1ad649-6e39-4624-b14d-60188284a36a",
+        "name": "Apply rules and log",
+        "nodeIds": [
+          "b988a7e9-8f8b-4cff-bc51-8a84d7923a85",
+          "114f7610-e845-4fd3-a9fa-50d0f2b28ad0",
+          "3d9c9a55-929d-402b-8df5-1a8529a99d21"
+        ],
+        "description": "Valid updates: applies the fixed pain and supervisor rules, writes an audit row, replies in chat"
+      },
+      {
+        "id": "789c3c95-a304-4e4c-baee-bf3491937a49",
+        "name": "Handle rejected input",
+        "nodeIds": [
+          "257a889e-b423-45ef-9e5e-bd462dd742e9",
+          "dd62f2cc-92e8-49c1-9f7b-0775e206c765"
+        ],
+        "description": "Invalid updates: records only a reason code (no raw text) and shows the expected format"
+      }
+    ],
+    "authors": "Hiba El gamri",
+    "name": "jahiz",
+    "description": "",
+    "autosaved": true,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-11-10T18:59:55.645Z",
+        "id": 1,
+        "workflowId": "keGPyMkxAbXpwDM3",
+        "versionId": "2603bb7b-2f9b-422b-bb8b-2db6a16e03a1",
+        "event": "activated",
+        "userId": "fc0ef3db-9ea8-4f0c-b597-a672f30e7fdd"
+      }
+    ]
+  },
+  "homeProject": {
+    "id": "msSqbndEwMwGVgvX",
+    "type": "personal",
+    "name": "Hiba El gamri <mlle.elgamrihiba@gmail.com>",
+    "icon": null
+  },
+  "sharedWithProjects": [],
+  "usedCredentials": [],
+  "scopes": [
+    "execution:delete",
+    "execution:list",
+    "execution:read",
+    "execution:reveal",
+    "workflow:create",
+    "workflow:delete",
+    "workflow:disableRedaction",
+    "workflow:enableRedaction",
+    "workflow:execute",
+    "workflow:execute-chat",
+    "workflow:export",
+    "workflow:import",
+    "workflow:list",
+    "workflow:move",
+    "workflow:publish",
+    "workflow:read",
+    "workflow:share",
+    "workflow:unpublish",
+    "workflow:unshare",
+    "workflow:update"
+  ],
+  "checksum": "96c952445478b42cd88bb19da634536cd617dc4ae75480e061e26bef5c8d7005"
+}

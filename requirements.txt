@@ -1,0 +1,5 @@
+streamlit>=1.40
+anthropic>=0.39
+chromadb>=0.5
+pypdf>=5
+pytest>=8
